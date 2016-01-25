@@ -1,0 +1,9 @@
+name = Sheetserve
+description = Server to see Annie's Bank Balance
+package = sheetserve 
+
+core = 7.x
+
+;It's only necessary to declare files[] if they declare a class or interface
+;files[] = sheetserve.inc
+;files[] = sheetserve.module
