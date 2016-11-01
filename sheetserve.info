@@ -1,9 +1,25 @@
 name = Sheetserve
-description = Server to see Annie's Bank Balance
+description = Server to see Annie's Bank Balance from external app
 package = sheetserve 
 
 core = 7.x
 
-;It's only necessary to declare files[] if they declare a class or interface
-;files[] = sheetserve.inc
-;files[] = sheetserve.module
+files[] = sheetserve.inc
+files[] = sheetserve.module
+
+; the sheetserve.install file sets up the database appropriately
+; working toward this reading in a new csv file and updating the
+; the database appropriately for it.
+
+; to update to a new spreadsheet (because editing them is very 
+; difficult in the drupal app: download the old one using the
+; feature to do so when viewing it on the web.  Use it to edit.
+; then:
+; sheetserve.inc includes a routine to update the nid number that 
+; references the spreadsheet.
+; you can add content (as an admin) referencing the new spreadsheet
+
+;sheetserve.inc callback for creating resources. .. the callbacks are 
+; associated with events in sheetserve.module routine sheetserve_services_resources 
+; this routine must be the entry routine from the services module. - the HOOK
+

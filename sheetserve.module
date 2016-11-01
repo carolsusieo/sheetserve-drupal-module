@@ -1,545 +1,469 @@
 <?php
-/**
- * @file Sheetserve.module Bank Balance.
- *
- * Contains routines to process display and update the bank balance
- * spreadsheet stored for the bank account.
- */
 
+// sheetserve.module
 /**
- * Fetches the sheetnode from the database.
- *
- * @param int $id
- *   Future use if more than one spreadsheet stored.
- *
- * @return object
- *    Spreadsheet.
- */
+*
+* @param int $id
+* @return object
+
+* Database call on currently stored sheetnode (last save) - no data updates
+*/
 function sheetserve_get_sheetnode($id) {
-  /*Return db_query('SELECT * FROM {sheetnode}
-  WHERE id=:id', array(':id' => $id))
-   */
-  // there is only one sheetnode at this point....
-  return db_query('SELECT * FROM {sheetnode}')->fetchAll();
+  global $sheetserve_node_id;
+  $exists =  db_query('SELECT * FROM {sheetnode} WHERE nid = :nid',
+    array(':nid' => $sheetserve_node_id))->fetch(); 
+  return exists;
 }
 
-/**
- * Writes a update to the sheet in the database.
- *
- * @param object $sheetnode
- *   Write in changed spreadsheet to the database.
- */
+
+
+/** Writes a update to the sheet in the database
+*
+* @param object 
+* @return void
+*/
 function sheetserve_write_sheetnode($sheetnode) {
-  $primary_key = !empty($sheetnode->id) ? array('id') : NULL;
-  drupal_write_record('sheetnode', $sheetnode, $primary_key);
+	global $sheetserve_key;
+    $primary_key = !empty($sheetnode->id) ? array('id') : $sheetserve_key;
+    drupal_write_record('sheetnode', $sheetnode, $primary_key);
 }
 
 
-/**
- * Export a sheetnode so that is can be massaged by phpexcel.
- *
- * @param int $node
- *    Node number of the spreadsheet.
- * @param object $socialcalc
- *    Storage for the socialcalc sheet.
- * @param object $workbook
- *    Storage forthe socialcalc workbook (multiple sheets).
- * @param object $activesheet
- *    Storage for the socialcalc sheet of the sheetnode (first one).
- *
- * @return object $context
- *    Application context.
- */
-function sheetserve_export_nodes($node, &$socialcalc, &$workbook, &$activesheet) {
 
-  // Use sheetnode module... links.
-  require_once drupal_get_path('module', 'sheetnode') .
-                '/socialcalc.inc';
-  require_once drupal_get_path('module', 'sheetnode') .
-            '/modules/sheetnode_phpexcel/sheetnode_phpexcel.export.inc';
-  $format = "xls";
-  // Here sheetnode_item is a node of nid = 33, all the socialcalc stuff.
-  $socialcalc = socialcalc_parse($node->sheetnode['value']);
-  $title = $filename = "test2";
-  $destination = file_directory_temp();
-  $context['results']['workbook'] = NULL;
-  _sheetnode_phpexcel_batch_export_sheet($title, $socialcalc, $filename,
-        $format, $destination, $context);
-  $context['sandbox']['workbook'] = $context['results']['workbook'];
-  /* Create sheetnode out of current sheet that was created when I did
-  the export of sheetnode into php excel.
-   */
-  $context['sandbox']['current'] = 1;
-  $workbook = unserialize($context['sandbox']['workbook']);
-  $activesheet = $workbook->getSheet(0);
-  return $context;
+
+/**
+ * Custom page callback function, declared in sheetserve2_menu().
+ * 
+ * these are used by the web page as well as the  android application
+ * 
+ * 
+ *   .../drupal7/sheetserve
+ */
+function sheetserve_export_nodes($node,&$socialcalc,&$workbook,&$activesheet) {
+		
+	global $sheetserve_title;
+	// use sheetnode... links
+	require_once(drupal_get_path('module','sheetnode').'/socialcalc.inc');
+	require_once(drupal_get_path('module','sheetnode').'/modules/sheetnode_phpexcel/sheetnode_phpexcel.export.inc');
+	$format = "xls";
+ 	// here sheetnode_item is a node of nid = 33, vid= 33, value = all the socialcalc stuff.
+	$socialcalc = socialcalc_parse($node->sheetnode['value']);
+	$title= $filename = $sheetserve_title;
+
+	$destination = file_directory_temp();
+	$context['results']['workbook'] = null;
+    _sheetnode_phpexcel_batch_export_sheet($title, $socialcalc, $filename, $format, $destination,$context) ;
+    $context['sandbox']['workbook'] = $context['results']['workbook'];
+     // Create sheetnode out of current sheet that was created when I did the export of sheetnode into php excel.
+	$context['sandbox']['current'] = 1; 
+    $workbook = unserialize($context['sandbox']['workbook']);
+    $activesheet = $workbook->getSheet(0);
+    return $context;
+}
+
+//  i have exported already... that is where I got the context etc, that I am passing in
+//... now i bring it back
+function sheetserve_import_nodes($context,&$socialcalc,&$workbook,&$activesheet,&$oldnode = null)
+{
+    global $sheetserve_title;
+	// use sheetnode... links
+	require_once(drupal_get_path('module','sheetnode').'/socialcalc.inc');
+	require_once(drupal_get_path('module','sheetnode').'/modules/sheetnode_phpexcel/sheetnode_phpexcel.import.inc');
+	
+ 	$filename = $sheetserve_title;
+	$filepath = file_directory_temp();
+	$callback = null;
+	$params = null;
+	
+    
+    $node = new StdClass;
+    $node->type = 'sheetnode';
+    node_object_prepare($node);
+    $node->title = $activesheet->getTitle();
+
+    $node->language = LANGUAGE_NONE;
+    $node->sheetnode['value'] = _sheetnode_phpexcel_import_do($workbook, $activesheet);
+    $node->sheetnode['template'] = NULL;
+
+    drupal_alter('sheetnode_import', $node, $params, $context);
+	$oldnode->sheetnode['value'] = $node->sheetnode['value'];
+	$socialcalc = socialcalc_parse($node->sheetnode['value']);
+	return $socialcalc;
 }
 
 
-/**
- * Import a sheetnode that has been massaged by phpexcel.
- *
- * @param object $context
- *    Application context.
- * @param object $socialcalc
- *    Storage the socialcalc sheet.
- * @param object $workbook
- *    Storage for the socialcalc workbook.
- * @param object $activesheet
- *    Storage for the socialcalc sheet.
- * @param object $oldnode
- *    Set to null when doing an export/import so that
- *    php excel is performed on the spreadsheet.
- *
- * @return object $socialcalc
- *    Updated socialcalc pointer.
- */
-function sheetserve_import_nodes($context, &$socialcalc, &$workbook,
-                &$activesheet, &$oldnode = NULL) {
 
-  // Use sheetnode... links.
-  require_once drupal_get_path('module', 'sheetnode') . '/socialcalc.inc';
-  require_once drupal_get_path('module', 'sheetnode') .
-        '/modules/sheetnode_phpexcel/sheetnode_phpexcel.import.inc';
-
-  $filename = "test2";
-  $filepath = file_directory_temp();
-  $callback = NULL;
-  $params = NULL;
-
-  $node = new StdClass();
-  $node->type = 'sheetnode';
-  node_object_prepare($node);
-  $node->title = $activesheet->getTitle();
-  $node->language = LANGUAGE_NONE;
-  $node->sheetnode['value'] = _sheetnode_phpexcel_import_do($workbook, $activesheet);
-  $node->sheetnode['template'] = NULL;
-
-  drupal_alter('sheetnode_import', $node, $params, $context);
-  $oldnode->sheetnode['value'] = $node->sheetnode['value'];
-  $socialcalc = socialcalc_parse($node->sheetnode['value']);
-  return $socialcalc;
-}
-
-
-/**
- * Currently not referenced.
- *
- * @return array $items
- *    Value for menu display (not used).
- */
+// currently not referenced.  This is what needs to be used in a browser, 
+//to show annie's bank account information ...
+// just the basics... not the entire spread sheet.
 function sheetserve_menu() {
-  $items = array();
-  $items['sheetserve'] = array(
-    'title' => 'sheetserve',
-    'page callback' => '_sheetserve_page',
-    'service callback' => '_sheetserve_service',
-    'access arguments' => array('access sheetserve content'),
-    'type' => MENU_CALLBACK,
-  );
-  return $items;
-}
-
-
-/**
- * Callback for the page display.
- *
- * @param object $args
- *    Values are'update' - process a transaction,
- *         otherwise return the current balance.
- *
- * @return array $page_array
- *    Page to display.
- */
-function _sheetserve_page($args) {
-  global $_time = 1;
-  // Args comes in as the value after the sheetserve call.
-  if ($args == 'update') {
-    $now = time();
-    if ((round(($now / 100), 0)) != $_time) {
-      $data = array(
-        'amt' => '123',
-        'label' => 'candy',
-        'currency' => 'USD',
-
+    $items = array();    
+    $items['sheetserve'] = array(
+        'title' => 'sheetserve',
+        'page callback' => '_sheetserve_page',
+        'service callback' => '_sheetserve_service',
+        'access arguments' => array('access sheetserve content'),
+		'type' => MENU_CALLBACK, // path and attributes only... no menu item
       );
-      $sheet = sheetserve_put_transaction($data);
-      $balance = 'UPDATED';
-    }
-    $_time = round($now / 100, 0);
-  }
-  else {
-    drupal_set_title('Annie Bank Balance');
-    $nid = 33;
-    $node = node_load($nid);
-    $balance = sheetserve_get_updated_balance($node);
-  }
-  $page_array['sheetserve_arguments'] = array(
-    '#title' => t('Annie Bank Balance'),
-    '#items' => $balance,
-      // Theme hook with suggestion.
-    '#theme' => 'item_list',
-  );
-  return $page_array;
-
+    return $items;
 }
 
 
 /**
- * Get the balance in USD in the stored sheetnode.
- *
- * @return string
- *    Balance.
+ * Custom page callback function, declared in sheetserve_menu().
+ * 
+ * these are used by the web page as well as the  android application
  */
+ /* what to do when we want to display the page in a browser with the current balance*/
+ /* .../sheetserve/retrieve - actually .../sheetserve/anything  */
+function _sheetserve_page($args) {
+global $time;
+$time = 1;
+global $sheetserve_title;
+global $sheetserve_node_id;
+  // args comes in as the value after the sheetserve call.
+  
+  if($args == 'update')
+  {
+	  $now = time();
+	  if((round(($now/100),0)) != $time )
+	  {
+		  // right now, we are going through - 2 at a time... initial call, and then the update...  need to only
+		  // add the transaction once...
+		  $data = array(
+			'amt' => '123',
+			'label' => 'candy',
+			'currency' => 'USD',
+			
+		  );
+		  $sheet = sheetserve_put_transaction($data);
+		  // if I come in here, it logs twice...
+		  $A2 =  'UPDATED';
+	  }
+	  $time = round($now/100,0);
+  }
+  else
+  {
+	  drupal_set_title($sheetserve_title);
+	    $node = node_load($sheetserve_node_id);
+ 		$A2 = sheetserve_get_updated_balance($node);
+   }
+	$page_array['sheetserve_arguments'] = array(
+	  '#title' => $sheetserve_title,
+	  '#items' => $A2,
+	  //Theme hook with suggestion.  
+	  '#theme' => 'item_list',
+	  );
+  return $page_array;
+  
+}
+
+// curently only returns the total balance in USD on any retrieve operation
 function _sheetserve_service() {
 
-  // Note hardcoded node id.
-  $nid = 33;
-  $node = node_load($nid);
-  return sheetserve_get_updated_balance($node);
+    global $sheetserve_node_id;
+	$node = node_load($sheetserve_node_id);
+ 	$A2 = sheetserve_get_updated_balance($node);
+ 	return $A2;
+  
 }
 
-/**
- * Get the bank balance from the sheetnode and return to it to caller.
- *
- * @param object $node
- *    Current node for sheetnode.
- * @param object $socialcalc
- *    If non-null function will send current balance,
- *    if null, get the sheet from database and sends back value as
- *    currently stored.
- *
- * @return string
- *    Balance to display.
- */
-function sheetserve_get_balance($node, $socialcalc) {
-
-  if (empty($socialcalc)) {
-    require_once drupal_get_path('module', 'sheetnode') . '/socialcalc.inc';
-    $sheetnode_item = $node->sheetnode;
-    $socialcalc = socialcalc_parse($sheetnode_item['value']);
-    $sheet = $socialcalc['sheet'];
-  }
-  else {
-    $sheet = $socialcalc['sheet'];
-  }
-  return $sheet['cells']['A2']['datavalue'];
+// if non-null $socialcalc, will send current balance in socialcalc sheet
+// if null,get the sheet from database and sends back value as currently stored
+function sheetserve_get_balance($node,$socialcalc)
+{
+	if(empty($socialcalc))
+	{
+		require_once(drupal_get_path('module', 'sheetnode') .'/socialcalc.inc');
+		$sheetnode_item= $node->sheetnode;
+		$socialcalc = socialcalc_parse($sheetnode_item['value']);
+		$sheet = $socialcalc['sheet'];
+	}
+	else
+		$sheet = $socialcalc['sheet'];
+		
+	$A2 = $sheet['cells']['A2']['datavalue'];
+			
+ 	return $A2;
+	
 }
 
-/**
- * Entry point.
- *
- * Stored values to new values, given changes in dates and whatever else.
- * The update occurs when you export it to phpexcel and then import it
- * back into sheetnode.
- *
- * @param object $node
- *    Derived from already doing a node_load with the node number.
- *
- * @return object $socialcalc
- *    Socialcalc sheet.
- */
-function sheetserve_get_updated_socialcalc($node) {
-  $socialcalc = NULL;
-  $workbook = NULL;
-  $activesheet = NULL;
-  $context = sheetserve_export_nodes($node, $socialcalc, $workbook, $activesheet);
-  sheetserve_import_nodes($context, $socialcalc, $workbook, $activesheet);
-  return $socialcalc;
+// starting from scratch...  get the stored sheet, update all the 
+// stored values to new values, given changes in dates and whatever else  
+function sheetserve_get_updated_socialcalc($node)
+{
+	$socialcalc = null;
+	$workbook = null;
+	$activesheet = null;
+    $context = sheetserve_export_nodes($node,$socialcalc,$workbook,
+      $activesheet);
+	sheetserve_import_nodes($context,$socialcalc,$workbook,$activesheet);
+	return $socialcalc;
 }
 
 
-/**
- * Get the spreadsheet balance, after an update.
- *
- * The update uses php excel to change static values based on
- * date and other changes made since last manual update to sheet.
- *
- * @param object $node
- *    Derived from already doing a node_load with the node number.
- *
- * @return string $items
- *    Balance.
- */
-function sheetserve_get_updated_balance($node) {
-
-  $socialcalc = sheetserve_get_updated_socialcalc($node);
-  $balance = sheetserve_get_balance($node, $socialcalc);
-  $items = array('data' => $balance);
-  return $items;
-
-}
-
-/**
- * Set up the array of transactions stored in the spreadsheet.
- *
- * @param object $action
- *    Values are 'add' 'new' (future) 'delete' 'update' 'view'.
- *
- * @return array $trans
- *    Place to store transactions.
- */
-function sheetserve_transaction_array($action, $tran) {
-
-  global $_trans;
-
-  switch ($action) {
-    case 'add':
-      array_push($_trans, $tran);
-      break;
-
-    case 'delete':
-      break;
-
-    case 'update':
-      break;
-
-    case 'view':
-      break;
-
-    default:
-      // 'new'.
-      if ($_trans) {
-        unset($_trans);
-      }
-      // Wipe out the current array so we can start from scratch.
-      $_trans = array();
-      break;
-  }
-  return $_trans;
+function sheetserve_get_updated_balance($node)
+{
+	$socialcalc = sheetserve_get_updated_socialcalc($node);
+	$balance = sheetserve_get_balance($node,$socialcalc);
+	$items = array('data' => $balance);		
+ 	return $items;
+	
 }
 
 
-/**
- * Based on current column, determine name for next column.
- *
- * @param string $curr
- *    Current column letter.
- * @param int $num
- *    Number of columns to skip to get to next transaction location.
- *
- * @return char
- *    Value of new column for next transaction.
- */
-function col_inc($curr, $num) {
-
-  global $_letters = array('A', 'B', 'C', 'D', 'E', 'F', 'G', 'H', 'I',
-    'J', 'K', 'L', 'M', 'N', 'O', 'P', 'Q', 'R', 'S', 'T', 'U', 'V', 'W',
-    'X', 'Y', 'Z',
-  );
-
-  $i = 0;
-  // Find the current letter's position;.
-  for (; $i < 26 && $_letters[$i] != $curr; $i++) {
-
-  }
-  if ($i == 26) {
-    return $curr;
-  }
-  else {
-    return ($_letters[$i + $num]);
-  }
-
-}
-/**
- * What we know about the transaction portion of our spreadsheet.
- *
- * Dimensions (cells across for data : 4),
- * (a final cell contains total based on amount and currency)
- * number of transactions on a row of the spreadsheet is
- * 4  for a total of 20 cells across.  Starting with
- * G - Date, H amt I reason description J Currency  K calculated.
- * L         M     N                    O           P
- * Q         R     S                    T           U
- * V         W     X                    Y           Z.
- * returns an array of the positions of the 4 cells.
- * These items: datecell, amtcell, labelcell, and currencycell.
- *
- * Param object $socialcalc
- *    Spreadsheet.
- * param object $sheet
- *    This sheet only of the overall socialcalc object.
- * return object $dataout
- *    Empty slot position to put the transaction into.
- */
-function sheetserve_find_empty_slot($socialcalc, &$sheet) {
-
-  // These 3 never change unless structure of the table changes....
-  $trans_per_row = 4;
-  // Last is never actually filled.
-  $data_per_tran = 5;
-  $col_start = 'G';
-  $max_rows = 67;
-
-  $current_in_row = 0;
-
-  // Socialcalc is an array... of 3 elements.
-  // sheet, edit and audit.
-  $sheet = $socialcalc['sheet'];
-  $row = 5;
-  $col = 'A';
-  $col2 = 'B';
-  $first = NULL;
-  $second = NULL;
-  $third = NULL;
-  $fourth = NULL;
-
-  // We send in the field names, right from the sheetnode....
-  $labels = array();
-  do {
-    $col = col_inc($col_start, $current_in_row);
-    $cell = sprintf("%s1", $col);
-    array_push($labels, $sheet['cells'][$cell]['datavalue']);
-    $current_in_row++;
-  } while ($current_in_row < ($data_per_tran - 1));
-  $current_in_row = 0;
-
-  sheetserve_transaction_array('new', $labels);
-  sheetserve_transaction_array('add', $labels);
-
-  do {
-    $desc = NULL;
-    $first = $second = $third = $fourth = NULL;
-
-    $col = col_inc($col_start, ($current_in_row * $data_per_tran));
-    $cell = sprintf('%s%d', $col, $row);
-    if (!empty($sheet['cells'][$cell])) {
-      if (!empty($sheet['cells'][$cell]['datavalue'])) {
-        $first = $sheet['cells'][$cell]['datavalue'];
-      }
-      else {
-        $first = 0;
-      }
-
-      if ($first == 0) {
-        // Check to make sure to blank or zeroed items in a row
-        // this is our stopping place.
-        $col = col_inc($col, 1);
-        $cell2 = sprintf('%s%d', $col2, $row);
-        if (!empty($cell2['datavalue'])) {
-          $second = $sheet['cells'][$cell2]['datavalue'];
-          if ($second == NULL || $second == '') {
-            $first = NULL;
-            $second = NULL;
-          }
-        }
-
-      }
-      elseif ($first == '') {
-        $first = NULL;
-      }
-    }
-    else {
-      $first = NULL;
-    }
-
-    if ($first != NULL || $second != NULL) {
-      if ($second == NULL) {
-        $col = col_inc($col, 1);
-        $second = sprintf("%s%d", $col, $row);
-        $second = $sheet['cells'][$second]['datavalue'];
-
-      }
-      $col = col_inc($col, 1);
-      $third = sprintf("%s%d", $col, $row);
-      $col = col_inc($col, 1);
-      $fourth = sprintf("%s%d", $col, $row);
-
-      $third = $sheet['cells'][$third]['datavalue'];
-      $fourth = $sheet['cells'][$fourth]['datavalue'];
-      $trans = sheetserve_transaction_array('add',
-      array($first, $second, $third, $fourth));
-      // Store the current transaction in the list of transactions.
-      $current_in_row++;
-      if ($current_in_row >= $trans_per_row) {
-        $current_in_row = 0;
-        $row++;
-      }
-    }
-
-  } while ($row < $max_rows && ($first != NULL || $second != NULL));
-
-  if ($row < $max_rows) {
-    // Send back the blank position.
-    $first = sprintf("%s%d", col_inc($col_start,
-       ($current_in_row * $data_per_tran)), $row);
-    $second = sprintf("%s%d", col_inc($col_start,
-       (1 + ($current_in_row * $data_per_tran))), $row);
-    $third = sprintf("%s%d", col_inc($col_start,
-       (2 + ($current_in_row * $data_per_tran))), $row);
-    $fourth = sprintf("%s%d", col_inc($col_start,
-       (3 + ($current_in_row * $data_per_tran))), $row);
-
-    $dataout = array($first, $second, $third, $fourth);
-  }
-  else {
-    $dataout = NULL;
-  }
-  return $dataout;
+function sheetserve_transaction_array($action,$tran)
+{
+	global $trans;
+	
+	switch($action){
+		case 'add':
+			array_push($trans,$tran);
+		break;
+		case 'delete':
+		break;
+		case 'update':
+		break;
+		case 'view':
+		break;
+		default:
+			if($trans)
+				unset($trans);
+			// first time, wipe out the current array so we can start 
+			//from scratch
+			$trans = array();
+		break;
+	}
+	return $trans;
 }
 
-/**
- * Add transaction when 'put' processed.
- *
- * @param object $data
- *    Transaction data from other app.
- *
- * @return object $sheet
- *    Socialcalc with updated transaction.
- */
-function sheetserve_put_transaction($data) {
 
-  // I need to store data somewhere so I can review it later.
-  watchdog('sheetserve',
-    'From Put Amt = "!amt" Label = "!label" Currency = " !currency',
-    array(
-      '!amt' => $data['amt'],
-      '!label' => $data['label'],
-      '!currency' => $data['currency'],
-    ), WATCHDOG_NOTICE);
-  require_once drupal_get_path('module', 'sheetnode') .
-    '/modules/sheetnode_phpexcel/sheetnode_phpexcel.import.inc';
-  require_once drupal_get_path('module', 'sheetnode') . '/sheetnode.module';
-  $nid = 33;
-  $node = node_load($nid);
-  // sheetnode['value'] include vid, title, sheetnode.
-  $socialcalc = NULL;
-  $sheet = NULL;
-  $workbook = NULL;
-  $activesheet = NULL;
-  $context = sheetserve_export_nodes($node, $socialcalc, $workbook,
-  $activesheet);
+function col_inc($curr,$num)
+{
+	global $letters;
+	$letters = array ('A', 'B', 'C', 'D', 'E', 'F', 'G', 'H', 'I', 'J', 
+	  'K', 'L', 'M', 'N', 'O', 'P', 'Q', 'R', 'S', 'T', 'U', 'V', 'W', 
+	  'X', 'Y', 'Z');
 
-  // Find an empty slot.
-  $datapos = sheetserve_find_empty_slot($socialcalc, $sheet);
+     $i = 0;
+     // find the current one's position;
+     for(; $i < 26 && $letters[$i] != $curr; $i++);
+     if($i == 26)
+		return $curr;
+     else
+		return ($letters[$i + $num]);
+ 
+}
+// what we know about the transaction portion of our spreadsheet:
+// dimensions...  cells across for data....  4...  
+//(a final cell contains total based on amount and currency)
+// number of transactions on a row of the spreadsheet...   
+//4  for a total of 20 cells across... starting with 
+// G - Date, H amt I reason description J Currency  K calculated.
+// L         M     N                    O           P
+// Q         R     S                    T           U
+// V         W     X                    Y           Z 
 
-  if ($datapos != NULL) {
-    $date = date('d-M-y');
-    $activesheet->setCellValue($datapos[0], $date);
-    $activesheet->setCellValue($datapos[1], $data['amt']);
-    $activesheet->setCellValue($datapos[2], $data['label']);
-    $activesheet->setCellValue($datapos[3], $data['currency']);
-    sheetserve_transaction_array('add', array($date, $data['amt'],
-      $data['label'], $data['currency'],
-    ));
-    sheetserve_import_nodes($context, $socialcalc, $workbook,
-    $activesheet, $node);
-    sheetnode_update($node);
-  }
-  return $sheet;
+
+
+
+
+// this looks like it is working now....  
+// returns and array of the positions of the 4 cells..  
+//datecell, amtcell, labelcell, and currencycell 
+function sheetserve_find_empty_slot($socialcalc, &$sheet)
+{
+	
+	// these 3 never change unless structure of the table changes....
+	$trans_per_row = 4;
+	$data_per_tran = 5; // last is never actually filled
+	$col_start = 'G';
+	$max_rows = 67;
+	
+	$current_in_row = 0;
+	
+	// socialcalc is an array... of 3 elements.
+	// sheet, edit and audit
+	$sheet = $socialcalc['sheet'];	
+	$row = 5;
+	$col = 'A';
+	$col2 = 'B';
+	$first = null;
+	$second = null;
+	$third = null;
+	$fourth = null;
+	
+	// we send in the field names, right from the sheetnode....
+	$labels = array();
+	do
+	{
+		$col = col_inc($col_start, $current_in_row);
+		$cell = sprintf("%s1",$col);
+		array_push($labels,$sheet['cells'][$cell]['datavalue']);
+		$current_in_row++;
+    }while($current_in_row < ($data_per_tran - 1));
+    $current_in_row = 0;
+    
+	sheetserve_transaction_array('new',$labels);
+	sheetserve_transaction_array('add',$labels);
+	
+	do
+	{
+		$desc = null;
+		$first = $second = $third = $fourth = null;
+		
+		
+		$col = col_inc($col_start,($current_in_row * $data_per_tran));
+		$cell = sprintf('%s%d',$col,$row);
+		if(!empty($sheet['cells'][$cell]))
+		{
+			if(!empty($sheet['cells'][$cell]['datavalue']))
+				$first = $sheet['cells'][$cell]['datavalue'];
+			else
+				$first = 0;
+
+			if($first == 0)
+			{
+				// check to make sure to blank or zeroed items in a row
+				// this is our stopping place
+				$col = col_inc($col,1);	
+				$cell2 = sprintf('%s%d',$col2,$row);
+				if(!empty($cell2['datavalue']))
+				{
+					$second = $sheet['cells'][$cell2]['datavalue'];
+					if($second == null || $second == '')
+					{
+						$first = null;
+						$second = null;
+					}
+				}
+						
+			}
+			else if($first == '')
+				$first = null;
+		}	
+		else
+			$first = null;
+			
+		if($first != null || $second != null)
+		{	
+			if($second == null)
+			{
+				$col = col_inc($col,1);
+				$second = sprintf("%s%d",$col,$row);
+				$second = $sheet['cells'][$second]['datavalue'];
+				
+			}
+			$col = col_inc($col,1);
+			$third = sprintf("%s%d",$col,$row);
+			$col = col_inc($col,1);
+			$fourth = sprintf("%s%d",$col,$row);
+			
+			$third = $sheet['cells'][$third]['datavalue'];
+			$fourth = $sheet['cells'][$fourth]['datavalue'];
+			$trans = sheetserve_transaction_array('add',
+			  array($first,$second,$third,$fourth));
+			// store the current transaction in the list of transactions.
+			$current_in_row++;
+			if($current_in_row >= $trans_per_row){
+				
+				$current_in_row= 0;
+				$row++;
+			}
+		}
+		
+	} while($row < $max_rows && ($first != null || $second != null));
+	
+    if($row < $max_rows)
+    {   
+		// send back the blank position
+		$first = sprintf("%s%d",col_inc($col_start, 
+		  ($current_in_row * $data_per_tran)), $row);
+		$second = sprintf("%s%d",col_inc($col_start,
+		  ( 1 + ($current_in_row * $data_per_tran))), $row);
+		$third = sprintf("%s%d",col_inc($col_start, 
+		  (2 + ($current_in_row * $data_per_tran))), $row);
+		$fourth = sprintf("%s%d",col_inc($col_start , 
+		  (3 + ($current_in_row * $data_per_tran))), $row);
+			
+		$dataout = array($first,$second,$third,$fourth);
+	}
+	else $dataout = null;
+	return $dataout;
+}
+function sheetserve_get_transactions()
+{
+	global $sheetserve_node_id;
+	require_once(drupal_get_path('module','sheetnode').'/modules/sheetnode_phpexcel/sheetnode_phpexcel.import.inc');
+	require_once(drupal_get_path('module','sheetnode').'/sheetnode.module');
+	$nid = $sheetserve_node_id;
+	$node = node_load($nid);
+	
+	$socialcalc = null;
+  	$sheet = null;
+  	$workbook = null;
+  	$activesheet = null;
+    $context = sheetserve_export_nodes($node,$socialcalc,$workbook,
+      $activesheet);
+    
+  
+    // find an empty slot - which updates the array of transactions
+	$datapos = sheetserve_find_empty_slot($socialcalc,$sheet);
+	
+    return $sheet;         
 }
 
+function sheetserve_put_transaction($data)
+{
+	global $sheetserve_node_id;
+	// I need to store data somewhere so I can review it later.
+	watchdog('sheetserve','From Put Amt = "!amt" Label = "!label" 
+	  Currency = " !currency',
+	  array('!amt' => $data['amt'],'!label' =>$data['label'], 
+	  '!currency' => $data['currency']),WATCHDOG_NOTICE);	
+	require_once(drupal_get_path('module','sheetnode').
+	  '/modules/sheetnode_phpexcel/sheetnode_phpexcel.import.inc');
+	require_once(drupal_get_path('module','sheetnode').'/sheetnode.module');
+	$nid = $sheetserve_node_id;
+	$node = node_load($nid);
+	
+	$socialcalc = null;
+  	$sheet = null;
+  	$workbook = null;
+  	$activesheet = null;
+    $context = sheetserve_export_nodes($node,$socialcalc,$workbook,
+      $activesheet);
+    
+  
+    // find an empty slot
+	$datapos = sheetserve_find_empty_slot($socialcalc,$sheet);
+	
+	if($datapos != null)
+	{
+		$date = date('d-M-y');
+		$activesheet->setCellValue($datapos[0], $date);
+		$activesheet->setCellValue($datapos[1], $data['amt']);
+		$activesheet->setCellValue($datapos[2], $data['label']);       
+		$activesheet->setCellValue($datapos[3], $data['currency']);       
+		sheetserve_transaction_array('add',array($date,$data['amt'],
+		  $data['label'],$data['currency']));				
+		sheetserve_import_nodes($context,$socialcalc,$workbook,
+		  $activesheet,$node);
+		sheetnode_update($node);
+	}         
+    return $sheet;         
+}
+
+
+
 /**
- * Implementation of hook_services_resources().
- *
- * @return array
- *    Resources.
- */
+* Implementation of hook_services_resources().
+*/
+
 function sheetserve_services_resources() {
-
   return array(
     'sheetserve' => array(
-    // GET.
+	 //GET
       'retrieve' => array(
         'help' => 'Retrieves a sheetnode',
         'file' => array('file' => 'inc', 'module' => 'sheetserve'),
@@ -547,6 +471,8 @@ function sheetserve_services_resources() {
         'access callback' => '_sheetserve_access',
         'access arguments' => array('view'),
         'access arguments append' => TRUE,
+        // we aren't sending in any arguments....  This comes from 
+        // the android application....
         'args' => array(
           array(
             'name' => 'id',
@@ -557,7 +483,7 @@ function sheetserve_services_resources() {
           ),
         ),
       ),
-     // PUT.
+     // PUT 
       'update' => array(
         'help' => 'Updates a sheetnode',
         'file' => array('file' => 'inc', 'module' => 'sheetserve'),
@@ -565,6 +491,8 @@ function sheetserve_services_resources() {
         'access callback' => '_sheetserve_access',
         'access arguments' => array('update'),
         'access arguments append' => TRUE,
+        // we are sending in amount, description, type of currency - 
+        // as part of the data.
         'args' => array(
           array(
             'name' => 'id',
@@ -582,22 +510,23 @@ function sheetserve_services_resources() {
           ),
         ),
       ),
-        // Does this not show up because it is not CRUD?
+      
       'web' => array(
-        'help' => 'retrieve to display on web',
-        'callback' => '_sheetserve_page',
-        'access arguments' => 'view',
-        'access arguments append' => TRUE,
-        'args' => array(
-            array(
-              'name' => 'id',
-              'type' => 'int',
-              'description' => 'The id of sheetnode to view from web',
-              'source' => array('path' => '0'),
-              'optioonal' => FALSE,
-            ),
-        ),
-      ),
+		'help' => 'retrieve to display on web',
+		'callback'=> '_sheetserve_page',
+		'access arguments' => 'view',
+		'access arguments append' => TRUE,
+		'args' => array(
+			array(
+				'name' => 'id',
+				'type' => 'int',
+				'description' => 'The id of sheetnode to view from web',
+				'source' =>array('path' => '0'),
+				'optional' => FALSE,
+			),
+		  ),
+	   ),		
     ),
   );
 }
+
